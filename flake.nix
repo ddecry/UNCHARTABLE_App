@@ -7,8 +7,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     crane.url = "github:ipetkov/crane";
-    crane-tauri.url = "github:JPHutchins/crane-tauri";
-
+    crane-tauri.url = "github:ArtixBTW/crane-tauri";
   };
 
   outputs =
@@ -57,6 +56,8 @@
               gst_all_1.gst-plugins-base # appsink
               gst_all_1.gst-plugins-good # autoaudiosink
 
+              libayatana-appindicator
+
               # for xdg-open
               xdg-utils
             ];
@@ -80,6 +81,13 @@
         system:
         let
           version = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
+
+          maintainers = {
+            artixbtw = {
+              github = "ArtixBTW";
+              githubId = 44449514;
+            };
+          };
 
           pkgs = pkgsFor.${system};
           inherit (pkgs) lib;
@@ -115,14 +123,63 @@
           });
 
           tauri = inputs.crane-tauri.lib.buildTauriApp { inherit pkgs craneLib; } {
+            inherit
+              frontend
+              version
+              ;
+
             pname = "unchartable-app";
-            inherit version;
             src = ./.;
-            inherit frontend;
+            extraFileset = lib.fileset.unions [
+              ./src-tauri/template.desktop
+            ];
+
+            extraNativeBuildInputs =
+              with pkgs;
+              lib.optionals stdenv.hostPlatform.isLinux [
+                wrapGAppsHook3
+              ];
+
+            extraBuildInputs =
+              with pkgs;
+              lib.optionals stdenv.hostPlatform.isLinux [
+                # fixes tauri networking problems (like images not loading)
+                glib-networking
+
+                # audio & video playback (track previews, etc)
+                gst_all_1.gst-plugins-bad # fakevideosink
+                gst_all_1.gst-plugins-base # appsink
+                gst_all_1.gst-plugins-good # autoaudiosink
+
+                # for xdg-open which the tauri opener plugin (presumably) uses
+                xdg-utils
+              ];
+
+            craneArgs = {
+              # see: https://github.com/tauri-apps/libappindicator-rs/issues/49
+              # see: https://nixos.org/manual/nixpkgs/unstable/#ssec-gnome-hooks
+              preFixup =
+                lib.optionalString pkgs.stdenv.hostPlatform.isLinux
+                  # bash
+                  ''
+                    gappsWrapperArgs+=(
+                      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.libayatana-appindicator ]}
+                    )
+                  '';
+
+              meta = {
+                description = "A chart manager for UNBEATABLE";
+                homepage = "https://unchartable.site/";
+                license = lib.licenses.mit;
+                platforms = systems;
+                maintainers = [ maintainers.artixbtw ];
+              };
+            };
           };
         in
         {
-          unchartable-app = pkgs.callPackage ./package.nix { inherit (tauri) app; };
+          default = tauri.app;
+          unchartable-app = tauri.app;
         }
       );
     };
